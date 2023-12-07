@@ -1,6 +1,8 @@
+############## Importing variables and models from other py-files ##############
 from base import *
 from lpCompiler import _blocks
 from lpModels import modelShell
+import pandas as pd
 
 
 
@@ -53,13 +55,14 @@ def subsetIdsTech(x, techs, db):
 def subsetIdsTech_i(x, techs, db):
 	return adj.rc_pd(x, getTechs_i(techs,db))
 
+#def ConsumerSurplus();    mangler at få defineret denne
+	
+
+
+
+
+############################## Model mSimple ##############################
 class mSimple(modelShell):
-	""" This class includes 
-		(1) Electricity and heat markets, 
-		(2) multiple geographic areas, 
-		(3) trade in electricity, 
-		(4) dynamics, 
-		(5) CHP plants and heat pumps """
 	def __init__(self, db, blocks = None, **kwargs):
 		db.updateAlias(alias=[(k, k+'_constr') for k in ('h','g_E','g_H','g','id')]+[(k, k+'_alias') for k in ['g_E']])
 		db['gConnected'] = db['lineCapacity'].index
@@ -181,48 +184,3 @@ class mSimple(modelShell):
 			self.db['marginalEconomicValue'] = marginalEconomicValue(self)
 			self.db['meanConsumerPrice_E'] = meanMarginalSystemCost(self.db, self.db['HourlyDemand_E'],'E')
 			self.db['meanConsumerPrice_H'] = meanMarginalSystemCost(self.db, self.db['HourlyDemand_H'],'H')
-
-class mEmissionCap(mSimple):
-	def __init__(self, db, blocks = None, commonCap = True, **kwargs):
-		super().__init__(db, blocks=blocks, **kwargs)
-		self.commonCap = commonCap
-
-	@property
-	def b_ub(self):
-		return super().b_ub + [{'constrName': 'emissionsCap', 'value': pyDbs.pdSum(self.db['CO2Cap'],'g') if self.commonCap else adj.rc_pd(self.db['CO2Cap'], alias = {'g': 'g_constr'})}]
-
-	@property
-	def A_ub(self):
-		if self.commonCap:
-			return super().A_ub + [{'constrName': 'emissionsCap', 'varName': 'Generation_E', 'value': adjMultiIndex.bc(plantEmissionIntensity(self.db).xs('CO2',level='EmissionType'), self.globalDomains['Generation_E']), 'conditions': getTechs(['Standard (E)','Backpressure'],self.db)},
-								   {'constrName': 'emissionsCap', 'varName': 'Generation_H', 'value': adjMultiIndex.bc(plantEmissionIntensity(self.db).xs('CO2',level='EmissionType'), self.globalDomains['Generation_H']), 'conditions': getTechs('Standard (H)',self.db)}]
-		else:
-			return super().A_ub + [{'constrName': 'emissionsCap', 'varName': 'Generation_E', 'value': self.mapToG(adjMultiIndex.bc(plantEmissionIntensity(self.db).xs('CO2',level='EmissionType'), self.globalDomains['Generation_E']), 'E', alias = {'g':'g_constr'}), 'conditions': getTechs(['Standard (E)', 'Backpressure'], self.db)},
-								   {'constrName': 'emissionsCap', 'varName': 'Generation_H', 'value': self.mapToG(adjMultiIndex.bc(plantEmissionIntensity(self.db).xs('CO2',level='EmissionType'), self.globalDomains['Generation_H']), 'H', alias = {'g':'g_constr'}), 'conditions': getTechs('Standard (H)', self.db)}]
-
-class mRES(mSimple):
-	def __init__(self, db, blocks=None, commonCap = True, **kwargs):
-		super().__init__(db, blocks=blocks, **kwargs)
-		self.commonCap = commonCap
-
-	@property
-	def cleanIds(self):
-		s = (self.db['FuelMix'] * self.db['EmissionIntensity']).groupby('id').sum()
-		return s[s <= 0].index
-
-	@property
-	def b_ub(self):
-		return super().b_ub + [{'constrName': 'RESCapConstraint', 'value': 0 if self.commonCap else adj.rc_pd(pd.Series(0, index = self.db['RESCap'].index), alias = {'g':'g_constr'})}]
-
-	@property
-	def A_ub(self):
-		if self.commonCap:
-			return super().A_ub + [{'constrName': 'RESCapConstraint', 'varName': 'Generation_E', 'value': -1, 'conditions': ('and', [self.cleanIds, getTechs(['Standard (E)','Backpressure'],self.db)])},
-								   {'constrName': 'RESCapConstraint', 'varName': 'Generation_H', 'value': -1, 'conditions': ('and', [self.cleanIds, getTechs(['Standard (H)','Heat pump'],self.db)])},
-								   {'constrName': 'RESCapConstraint', 'varName': 'HourlyDemand_E','value': self.db['RESCap'].mean()},
-								   {'constrName': 'RESCapConstraint', 'varName': 'HourlyDemand_H','value': self.db['RESCap'].mean()}]
-		else:
-			return super().A_ub + [{'constrName': 'RESCapConstraint', 'varName': 'Generation_E',  'value': self.mapToG(pd.Series(-1, index = self.globalDomains['Generation_E']), 'E', alias = {'g':'g_constr'}), 'conditions': ('and', [self.cleanIds, getTechs(['Standard (E)','Backpressure'],self.db)])},
-								   {'constrName': 'RESCapConstraint', 'varName': 'Generation_H',  'value': self.mapToG(pd.Series(-1, index = self.globalDomains['Generation_H']), 'H', alias = {'g':'g_constr'}), 'conditions': ('and', [self.cleanIds, getTechs(['Standard (H)','Heat pump'],self.db)])},
-								   {'constrName': 'RESCapConstraint', 'varName': 'HourlyDemand_E','value': adj.rc_pd(self.mapToG(pd.Series(1, index = self.globalDomains['HourlyDemand_E']), 'E') * self.db['RESCap'], alias = {'g':'g_constr'})},
-								   {'constrName': 'RESCapConstraint', 'varName': 'HourlyDemand_H','value': adj.rc_pd(self.mapToG(pd.Series(1, index = self.globalDomains['HourlyDemand_H']), 'H') * self.db['RESCap'], alias = {'g':'g_constr'})}]
